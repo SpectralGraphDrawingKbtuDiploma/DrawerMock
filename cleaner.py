@@ -11,11 +11,11 @@ def clean_matrix_market(input_filename, output_filename):
 
     output_lines = []
 
-    dims = non_comment_lines[0].split()
-    if len(dims) < 2:
-        print("Error: the first non-comment line does not have enough entries.")
-        return
-    output_lines.append(" ".join(dims[:2]))
+    # dims = non_comment_lines[0].split()
+    # if len(dims) < 2:
+    #     print("Error: the first non-comment line does not have enough entries.")
+    #     return
+    # output_lines.append(" ".join(dims[:2]))
 
     for line in non_comment_lines[1:]:
         parts = line.split()
