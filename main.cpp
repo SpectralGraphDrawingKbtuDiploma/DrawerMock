@@ -1,16 +1,17 @@
-#include <Eigen/Sparse>
 #include <Eigen/Dense>
 #include <Eigen/Eigenvalues>
-#include <iostream>
-#include <fstream>
-#include <sstream>
-#include <vector>
-#include <queue>
-#include <chrono>
+#include <Eigen/Sparse>
+#include <algorithm>
 #include <cassert>
+#include <chrono>
 #include <cstdlib>
 #include <cstring>
-#include <algorithm>
+#include <fstream>
+#include <iomanip>
+#include <iostream>
+#include <queue>
+#include <sstream>
+#include <vector>
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -21,16 +22,16 @@ using namespace Eigen;
 
 // Graph structure holds basic CSR arrays as well as fields for coarsening.
 typedef struct {
-  long n;                     // number of vertices
-  long m;                     // number of nonzeros (for undirected graph, m = 2 * #edges)
+  long n; // number of vertices
+  long m; // number of nonzeros (for undirected graph, m = 2 * #edges)
   unsigned int *rowOffsets;
   unsigned int *adj;
-  long n_coarse;              // number of vertices in coarse graph
-  long m_coarse;              // number of edges in coarse graph
+  long n_coarse; // number of vertices in coarse graph
+  long m_coarse; // number of edges in coarse graph
   unsigned int *rowOffsetsCoarse;
   unsigned int *adjCoarse;
-  int *coarseID;              // mapping from fine to coarse vertices
-  double *eweights;           // edge weights in coarse graph
+  int *coarseID;    // mapping from fine to coarse vertices
+  double *eweights; // edge weights in coarse graph
 } graph_t;
 
 // Utility: convert number to string with fixed precision.
@@ -43,8 +44,8 @@ std::string to_string_with_precision(const T a_value, const int n = 8) {
 
 // Comparison function used in sorting coarse edges.
 static int vu_cmpfn_inc(const void *a, const void *b) {
-  int *av = (int *) a;
-  int *bv = (int *) b;
+  int *av = (int *)a;
+  int *bv = (int *)b;
   if (*av > *bv)
     return 1;
   if (*av < *bv)
@@ -57,7 +58,8 @@ static int vu_cmpfn_inc(const void *a, const void *b) {
 }
 
 // ---------------------------------------------------------------------
-// SIMPLE COARSENING: Merge vertices via matching until the coarse graph is small.
+// SIMPLE COARSENING: Merge vertices via matching until the coarse graph is
+// small.
 static int simpleCoarsening(graph_t *g, int coarseningType) {
   if (coarseningType == 0)
     return 0;
@@ -65,14 +67,14 @@ static int simpleCoarsening(graph_t *g, int coarseningType) {
   int num_coarsening_rounds_max = 100;
   int coarse_graph_nmax = 1000;
 
-  int *cID = (int *) malloc(g->n * sizeof(int));
+  int *cID = (int *)malloc(g->n * sizeof(int));
   assert(cID != NULL);
-  int *toMatch = (int *) malloc(g->n * sizeof(int));
+  int *toMatch = (int *)malloc(g->n * sizeof(int));
   assert(toMatch != NULL);
 
-  #ifdef _OPENMP
-  #pragma omp parallel for
-  #endif
+#ifdef _OPENMP
+#pragma omp parallel for
+#endif
   for (long i = 0; i < g->n; i++) {
     cID[i] = i;
     toMatch[i] = 1;
@@ -80,7 +82,8 @@ static int simpleCoarsening(graph_t *g, int coarseningType) {
 
   int coarse_vert_count = g->n;
   int num_rounds = 0;
-  while ((coarse_vert_count > coarse_graph_nmax) && (num_rounds < num_coarsening_rounds_max)) {
+  while ((coarse_vert_count > coarse_graph_nmax) &&
+         (num_rounds < num_coarsening_rounds_max)) {
     num_rounds++;
     int num_matched = 0;
     for (int i = 0; i < g->n; i++) {
@@ -90,7 +93,7 @@ static int simpleCoarsening(graph_t *g, int coarseningType) {
         u = cID[u];
       }
       if (toMatch[u] == 1) {
-        for (unsigned int j = g->rowOffsets[u]; j < g->rowOffsets[u+1]; j++) {
+        for (unsigned int j = g->rowOffsets[u]; j < g->rowOffsets[u + 1]; j++) {
           int v = g->adj[j];
           while (v != cID[v]) {
             cID[v] = cID[cID[v]];
@@ -111,13 +114,13 @@ static int simpleCoarsening(graph_t *g, int coarseningType) {
       }
     }
     int num_unmatched = coarse_vert_count - num_matched;
-    int new_coarse_vert_count = num_matched/2 + num_unmatched;
+    int new_coarse_vert_count = num_matched / 2 + num_unmatched;
     coarse_vert_count = new_coarse_vert_count;
     for (int i = 0; i < g->n; i++)
       toMatch[i] = 1;
   }
 
-  int *coarse_edges = (int *) malloc(2 * g->m * sizeof(int));
+  int *coarse_edges = (int *)malloc(2 * g->m * sizeof(int));
   assert(coarse_edges != NULL);
 
   // Update coarse IDs.
@@ -128,7 +131,7 @@ static int simpleCoarsening(graph_t *g, int coarseningType) {
     cID[i] = u;
   }
 
-  int *vertIDs = (int *) malloc(g->n * sizeof(int));
+  int *vertIDs = (int *)malloc(g->n * sizeof(int));
   assert(vertIDs != NULL);
   for (int i = 0; i < g->n; i++)
     vertIDs[i] = -1;
@@ -146,7 +149,7 @@ static int simpleCoarsening(graph_t *g, int coarseningType) {
   long ecount = 0;
   for (int i = 0; i < g->n; i++) {
     int u = vertIDs[i];
-    for (unsigned int j = g->rowOffsets[i]; j < g->rowOffsets[i+1]; j++) {
+    for (unsigned int j = g->rowOffsets[i]; j < g->rowOffsets[i + 1]; j++) {
       int v = vertIDs[g->adj[j]];
       coarse_edges[ecount++] = u;
       coarse_edges[ecount++] = v;
@@ -159,8 +162,8 @@ static int simpleCoarsening(graph_t *g, int coarseningType) {
   int prev_u = coarse_edges[0];
   int prev_v = coarse_edges[1];
   for (int i = 1; i < ecount; i++) {
-    int curr_u = coarse_edges[2*i];
-    int curr_v = coarse_edges[2*i+1];
+    int curr_u = coarse_edges[2 * i];
+    int curr_v = coarse_edges[2 * i + 1];
     if ((curr_u != prev_u) || (curr_v != prev_v)) {
       m_coarse++;
       prev_u = curr_u;
@@ -168,39 +171,41 @@ static int simpleCoarsening(graph_t *g, int coarseningType) {
     }
   }
 
-  double *eweights = (double *) malloc(m_coarse * sizeof(double));
+  double *eweights = (double *)malloc(m_coarse * sizeof(double));
   assert(eweights != NULL);
   for (int i = 0; i < m_coarse; i++)
     eweights[i] = 1.0;
 
-  unsigned int *rowOffsetsCoarse = (unsigned int *) malloc((coarse_vert_count+1) * sizeof(unsigned int));
+  unsigned int *rowOffsetsCoarse =
+      (unsigned int *)malloc((coarse_vert_count + 1) * sizeof(unsigned int));
   assert(rowOffsetsCoarse != NULL);
   for (int i = 0; i <= coarse_vert_count; i++)
     rowOffsetsCoarse[i] = 0;
 
-  unsigned int *adjCoarse = (unsigned int *) malloc(m_coarse * sizeof(unsigned int));
+  unsigned int *adjCoarse =
+      (unsigned int *)malloc(m_coarse * sizeof(unsigned int));
   assert(adjCoarse != NULL);
 
   m_coarse = 1;
   prev_u = coarse_edges[0];
   prev_v = coarse_edges[1];
   adjCoarse[0] = prev_v;
-  rowOffsetsCoarse[prev_u+1]++;
+  rowOffsetsCoarse[prev_u + 1]++;
   for (int i = 1; i < ecount; i++) {
-    int curr_u = coarse_edges[2*i];
-    int curr_v = coarse_edges[2*i+1];
+    int curr_u = coarse_edges[2 * i];
+    int curr_v = coarse_edges[2 * i + 1];
     if ((curr_u != prev_u) || (curr_v != prev_v)) {
       m_coarse++;
-      adjCoarse[m_coarse-1] = curr_v;
-      rowOffsetsCoarse[curr_u+1]++;
+      adjCoarse[m_coarse - 1] = curr_v;
+      rowOffsetsCoarse[curr_u + 1]++;
       prev_u = curr_u;
       prev_v = curr_v;
     } else {
-      eweights[m_coarse-1] += 1.0;
+      eweights[m_coarse - 1] += 1.0;
     }
   }
   for (int i = 1; i <= coarse_vert_count; i++)
-    rowOffsetsCoarse[i] += rowOffsetsCoarse[i-1];
+    rowOffsetsCoarse[i] += rowOffsetsCoarse[i - 1];
 
   free(coarse_edges);
   free(cID);
@@ -220,7 +225,8 @@ static int simpleCoarsening(graph_t *g, int coarseningType) {
 // LOAD THE GRAPH INTO AN EIGEN SPARSE MATRIX.
 // When coarsening is off (type 0) we build the matrix from the fine graph.
 // Otherwise we use the coarse graph arrays.
-static int loadToMatrix(SparseMatrix<double,RowMajor>& M, VectorXd& degrees, graph_t *g, int coarseningType) {
+static int loadToMatrix(SparseMatrix<double, RowMajor> &M, VectorXd &degrees,
+                        graph_t *g, int coarseningType) {
   typedef Triplet<double> T;
   vector<T> tripletList;
 
@@ -228,9 +234,9 @@ static int loadToMatrix(SparseMatrix<double,RowMajor>& M, VectorXd& degrees, gra
     tripletList.reserve(g->m);
     for (int i = 0; i < g->n; i++) {
       tripletList.push_back(T(i, i, 0.5));
-      degrees(i) = g->rowOffsets[i+1] - g->rowOffsets[i];
-      double nzv = 1.0 / (2.0 * (g->rowOffsets[i+1] - g->rowOffsets[i]));
-      for (unsigned int j = g->rowOffsets[i]; j < g->rowOffsets[i+1]; j++) {
+      degrees(i) = g->rowOffsets[i + 1] - g->rowOffsets[i];
+      double nzv = 1.0 / (2.0 * (g->rowOffsets[i + 1] - g->rowOffsets[i]));
+      for (unsigned int j = g->rowOffsets[i]; j < g->rowOffsets[i + 1]; j++) {
         unsigned int v = g->adj[j];
         tripletList.push_back(T(i, v, nzv));
       }
@@ -239,17 +245,19 @@ static int loadToMatrix(SparseMatrix<double,RowMajor>& M, VectorXd& degrees, gra
   } else {
     for (int i = 0; i < g->n_coarse; i++) {
       double degree_i = 0;
-      for (unsigned int j = g->rowOffsetsCoarse[i]; j < g->rowOffsetsCoarse[i+1]; j++)
+      for (unsigned int j = g->rowOffsetsCoarse[i];
+           j < g->rowOffsetsCoarse[i + 1]; j++)
         degree_i += g->eweights[j];
       degrees(i) = degree_i;
     }
     tripletList.reserve(g->m_coarse);
     for (long i = 0; i < g->n_coarse; i++) {
       double diag_val = 0;
-      double inv_2deg = 1.0/(2.0 * degrees(i));
-      for (unsigned int j = g->rowOffsetsCoarse[i]; j < g->rowOffsetsCoarse[i+1]; j++) {
+      double inv_2deg = 1.0 / (2.0 * degrees(i));
+      for (unsigned int j = g->rowOffsetsCoarse[i];
+           j < g->rowOffsetsCoarse[i + 1]; j++) {
         unsigned int v = g->adjCoarse[j];
-        if (v == (unsigned int) i)
+        if (v == (unsigned int)i)
           diag_val = g->eweights[j] * inv_2deg;
         else
           tripletList.push_back(T(i, v, g->eweights[j] * inv_2deg));
@@ -262,8 +270,10 @@ static int loadToMatrix(SparseMatrix<double,RowMajor>& M, VectorXd& degrees, gra
 }
 
 // ---------------------------------------------------------------------
-// A simple breadth-first search from a starting vertex. Returns a vector of distances.
-static VectorXd bfs(unsigned int *row, unsigned int *col, long N, long M, unsigned int start) {
+// A simple breadth-first search from a starting vertex. Returns a vector of
+// distances.
+static VectorXd bfs(unsigned int *row, unsigned int *col, long N, long M,
+                    unsigned int start) {
   VectorXd distances = VectorXd::Constant(N, -1);
   vector<int> visited(N, 0);
   queue<unsigned int> Q;
@@ -273,7 +283,7 @@ static VectorXd bfs(unsigned int *row, unsigned int *col, long N, long M, unsign
   while (!Q.empty()) {
     unsigned int cur = Q.front();
     Q.pop();
-    for (unsigned int j = row[cur]; j < row[cur+1]; j++) {
+    for (unsigned int j = row[cur]; j < row[cur + 1]; j++) {
       unsigned int nb = col[j];
       if (!visited[nb]) {
         visited[nb] = 1;
@@ -287,9 +297,11 @@ static VectorXd bfs(unsigned int *row, unsigned int *col, long N, long M, unsign
 
 // ---------------------------------------------------------------------
 // HIGH-DIMENSIONAL EMBEDDING (HDE) Initialization.
-// It repeatedly computes distance vectors (via BFS) and then performs D-orthogonalization.
-// The final two vectors (after an eigen–decomposition) are used as initial second and third eigenvectors.
-static int HDE(SparseMatrix<double,RowMajor>& M, graph_t *g, VectorXd& degrees, VectorXd& secondVec, VectorXd& thirdVec) {
+// It repeatedly computes distance vectors (via BFS) and then performs
+// D-orthogonalization. The final two vectors (after an eigen–decomposition) are
+// used as initial second and third eigenvectors.
+static int HDE(SparseMatrix<double, RowMajor> &M, graph_t *g, VectorXd &degrees,
+               VectorXd &secondVec, VectorXd &thirdVec) {
   auto startTimer = chrono::high_resolution_clock::now();
   long n = g->n;
   typedef Triplet<double> T;
@@ -297,20 +309,22 @@ static int HDE(SparseMatrix<double,RowMajor>& M, graph_t *g, VectorXd& degrees, 
   LTripletList.reserve(g->m);
   for (int i = 0; i < g->n; i++) {
     LTripletList.push_back(T(i, i, degrees(i)));
-    for (unsigned int j = g->rowOffsets[i]; j < g->rowOffsets[i+1]; j++) {
+    for (unsigned int j = g->rowOffsets[i]; j < g->rowOffsets[i + 1]; j++) {
       unsigned int v = g->adj[j];
       LTripletList.push_back(T(i, v, -1.0));
     }
   }
-  SparseMatrix<double,RowMajor> L(n, n);
+  SparseMatrix<double, RowMajor> L(n, n);
   L.setFromTriplets(LTripletList.begin(), LTripletList.end());
   auto endTimer = chrono::high_resolution_clock::now();
-  cout << "Laplacian load time: " << chrono::duration<double>(endTimer - startTimer).count() << " s." << endl;
+  cout << "Laplacian load time: "
+       << chrono::duration<double>(endTimer - startTimer).count() << " s."
+       << endl;
 
   startTimer = chrono::high_resolution_clock::now();
   VectorXi min_dist = VectorXi::Constant(g->n, INT_MAX);
   int maxM = 50;
-  MatrixXd dist = MatrixXd::Zero(n, maxM+1);
+  MatrixXd dist = MatrixXd::Zero(n, maxM + 1);
   MatrixXd dist_bak = MatrixXd::Zero(n, maxM);
   VectorXd init_vec = VectorXd::Ones(n);
   init_vec.normalize();
@@ -320,7 +334,7 @@ static int HDE(SparseMatrix<double,RowMajor>& M, graph_t *g, VectorXd& degrees, 
     dist.col(run_count) = bfs(g->rowOffsets, g->adj, n, g->m, start_idx);
     for (int i = 0; i < n; i++) {
       if (dist(i, run_count) < min_dist(i))
-        min_dist(i) = (int) dist(i, run_count);
+        min_dist(i) = (int)dist(i, run_count);
     }
     int max_val = -1;
     for (int i = 0; i < n; i++) {
@@ -336,7 +350,8 @@ static int HDE(SparseMatrix<double,RowMajor>& M, graph_t *g, VectorXd& degrees, 
     for (int k = 0; k < j; k++) {
       VectorXd dnormvec = dist.col(k).cwiseProduct(degrees);
       double multplr = dist.col(j).dot(dnormvec);
-      dist.col(j) = dist.col(j) - (multplr / dnormvec.dot(dist.col(k))) * dist.col(k);
+      dist.col(j) =
+          dist.col(j) - (multplr / dnormvec.dot(dist.col(k))) * dist.col(k);
     }
     double normdist = dist.col(j).norm();
     if (normdist < 0.001) {
@@ -345,7 +360,7 @@ static int HDE(SparseMatrix<double,RowMajor>& M, graph_t *g, VectorXd& degrees, 
     } else {
       dist.col(j).normalize();
     }
-    dist_bak.col(j-1) = dist.col(j);
+    dist_bak.col(j - 1) = dist.col(j);
     j++;
   }
   MatrixXd LX = L * dist_bak;
@@ -353,17 +368,22 @@ static int HDE(SparseMatrix<double,RowMajor>& M, graph_t *g, VectorXd& degrees, 
   SelfAdjointEigenSolver<MatrixXd> es(XtLX);
   MatrixXd init_vecs = dist_bak * es.eigenvectors().leftCols(2).real();
   auto endTimer2 = chrono::high_resolution_clock::now();
-  cout << "HDE Initialization time: " << chrono::duration<double>(endTimer2 - startTimer).count() << " s." << endl;
+  cout << "HDE Initialization time: "
+       << chrono::duration<double>(endTimer2 - startTimer).count() << " s."
+       << endl;
   secondVec = init_vecs.col(0);
-  thirdVec  = init_vecs.col(1);
+  thirdVec = init_vecs.col(1);
   return 0;
 }
 
 // ---------------------------------------------------------------------
-// Koren's Power–Iteration Algorithm for computing the second and third eigenvectors.
-// It performs D–orthonormalization against previously computed eigenvectors.
-static int powerIterationKoren(SparseMatrix<double,RowMajor>& M, VectorXd& degrees, double eps,
-                                VectorXd& firstVec, VectorXd& secondVec, VectorXd& thirdVec, int coarseningType) {
+// Koren's Power–Iteration Algorithm for computing the second and third
+// eigenvectors. It performs D–orthonormalization against previously computed
+// eigenvectors.
+static int powerIterationKoren(SparseMatrix<double, RowMajor> &M,
+                               VectorXd &degrees, double eps,
+                               VectorXd &firstVec, VectorXd &secondVec,
+                               VectorXd &thirdVec, int coarseningType) {
   cout << "Using eps " << eps << " for second eigenvector" << endl;
   int n = M.rows();
   VectorXd uk_hat = secondVec;
@@ -387,7 +407,9 @@ static int powerIterationKoren(SparseMatrix<double,RowMajor>& M, VectorXd& degre
   cout << "Num iterations for second eigenvector: " << num_iterations1 << endl;
   secondVec = uk_hat;
   auto endTimer = chrono::high_resolution_clock::now();
-  cout << "Second eigenvector computation time: " << chrono::duration<double>(endTimer - startTimer).count() << " s." << endl;
+  cout << "Second eigenvector computation time: "
+       << chrono::duration<double>(endTimer - startTimer).count() << " s."
+       << endl;
 
   eps = 2.0 * eps;
   cout << "Using eps " << eps << " for third eigenvector" << endl;
@@ -412,31 +434,41 @@ static int powerIterationKoren(SparseMatrix<double,RowMajor>& M, VectorXd& degre
   cout << "Num iterations for third eigenvector: " << num_iterations2 << endl;
   thirdVec = uk_hat;
   auto endTimer2 = chrono::high_resolution_clock::now();
-  cout << "Third eigenvector computation time: " << chrono::duration<double>(endTimer2 - startTimer).count() << " s." << endl;
-  cout << "Dot products of eigenvectors: " << firstVec.dot(secondVec) << " " << firstVec.dot(thirdVec) << " " << secondVec.dot(thirdVec) << endl;
+  cout << "Third eigenvector computation time: "
+       << chrono::duration<double>(endTimer2 - startTimer).count() << " s."
+       << endl;
+  cout << "Dot products of eigenvectors: " << firstVec.dot(secondVec) << " "
+       << firstVec.dot(thirdVec) << " " << secondVec.dot(thirdVec) << endl;
   return 0;
 }
 
 // ---------------------------------------------------------------------
-// Tutte Refinement: Multiply the coordinate vectors repeatedly with a modified matrix.
-static int RefineTutte(SparseMatrix<double,RowMajor>& M, VectorXd& secondVec, VectorXd& thirdVec, int numSmoothing) {
+// Tutte Refinement: Multiply the coordinate vectors repeatedly with a modified
+// matrix.
+static int RefineTutte(SparseMatrix<double, RowMajor> &M, VectorXd &secondVec,
+                       VectorXd &thirdVec, int numSmoothing) {
   cout << "Number of smoothing rounds: " << numSmoothing << endl;
   auto startTimer = chrono::high_resolution_clock::now();
-  SparseMatrix<double,RowMajor> M2 = 2 * M;
+  SparseMatrix<double, RowMajor> M2 = 2 * M;
   M2.diagonal().setZero();
   for (int i = 0; i < numSmoothing; i++) {
     secondVec = M2 * secondVec;
     thirdVec = M2 * thirdVec;
   }
   auto endTimer = chrono::high_resolution_clock::now();
-  cout << "RefineTutte Time: " << chrono::duration<double>(endTimer - startTimer).count() << " s." << endl;
+  cout << "RefineTutte Time: "
+       << chrono::duration<double>(endTimer - startTimer).count() << " s."
+       << endl;
   return 0;
 }
 
 // ---------------------------------------------------------------------
-// Write the computed 2D coordinates (using second and third eigenvectors) to an output file.
-static int writeCoords(SparseMatrix<double,RowMajor>& M, VectorXd& firstVec, VectorXd& secondVec, VectorXd& thirdVec,
-                       int coarseningType, int doHDE, int refineType, double eps, const char *inputFilename) {
+// Write the computed 2D coordinates (using second and third eigenvectors) to an
+// output file.
+static int writeCoords(SparseMatrix<double, RowMajor> &M, VectorXd &firstVec,
+                       VectorXd &secondVec, VectorXd &thirdVec,
+                       int coarseningType, int doHDE, int refineType,
+                       double eps, const char *inputFilename) {
   string outFilename = "embedding.txt";
   ofstream fout(outFilename);
   if (!fout.is_open()) {
@@ -454,13 +486,13 @@ static int writeCoords(SparseMatrix<double,RowMajor>& M, VectorXd& firstVec, Vec
 
 // ---------------------------------------------------------------------
 // Read graph from a text file (each line: "u v") and build a CSR structure.
-graph_t* readGraphFromTxt(const char *filename) {
+graph_t *readGraphFromTxt(const char *filename) {
   ifstream fin(filename);
   if (!fin.is_open()) {
     cerr << "Error: cannot open file " << filename << endl;
     exit(1);
   }
-  vector< pair<unsigned int, unsigned int> > edges;
+  vector<pair<unsigned int, unsigned int>> edges;
   unsigned int u, v;
   unsigned int maxVertex = 0;
   while (fin >> u >> v) {
@@ -468,10 +500,10 @@ graph_t* readGraphFromTxt(const char *filename) {
     maxVertex = max(maxVertex, max(u, v));
   }
   fin.close();
-  long n = maxVertex + 1;       // assuming vertices are zero-indexed
-  long m = edges.size() * 2;    // undirected graph: add both (u,v) and (v,u)
+  long n = maxVertex + 1;    // assuming vertices are zero-indexed
+  long m = edges.size() * 2; // undirected graph: add both (u,v) and (v,u)
 
-  vector< vector<unsigned int> > adjList(n);
+  vector<vector<unsigned int>> adjList(n);
   for (auto &e : edges) {
     u = e.first;
     v = e.second;
@@ -479,14 +511,15 @@ graph_t* readGraphFromTxt(const char *filename) {
     adjList[v].push_back(u);
   }
 
-  unsigned int *rowOffsets = (unsigned int *) malloc((n+1) * sizeof(unsigned int));
+  unsigned int *rowOffsets =
+      (unsigned int *)malloc((n + 1) * sizeof(unsigned int));
   assert(rowOffsets != NULL);
-  unsigned int *adj = (unsigned int *) malloc(m * sizeof(unsigned int));
+  unsigned int *adj = (unsigned int *)malloc(m * sizeof(unsigned int));
   assert(adj != NULL);
 
   rowOffsets[0] = 0;
   for (long i = 0; i < n; i++) {
-    rowOffsets[i+1] = rowOffsets[i] + adjList[i].size();
+    rowOffsets[i + 1] = rowOffsets[i] + adjList[i].size();
   }
   for (long i = 0; i < n; i++) {
     for (size_t j = 0; j < adjList[i].size(); j++) {
@@ -494,7 +527,7 @@ graph_t* readGraphFromTxt(const char *filename) {
     }
   }
 
-  graph_t *g = (graph_t *) malloc(sizeof(graph_t));
+  graph_t *g = (graph_t *)malloc(sizeof(graph_t));
   assert(g != NULL);
   g->n = n;
   g->m = m;
@@ -512,15 +545,20 @@ graph_t* readGraphFromTxt(const char *filename) {
 
 // ---------------------------------------------------------------------
 // MAIN: Parse command-line options, read the graph, run coarsening (if any),
-// then compute the spectral embedding using HDE, Koren's algorithm and/or Tutte refinement.
-// Finally, write the output embedding.
+// then compute the spectral embedding using HDE, Koren's algorithm and/or Tutte
+// refinement. Finally, write the output embedding.
 int main(int argc, char **argv) {
   if (argc != 5) {
-    cout << "Usage: " << argv[0] << " <graph.txt> <0/1/2> <0/1> <0/1/2/3>" << endl;
+    cout << "Usage: " << argv[0] << " <graph.txt> <0/1/2> <0/1> <0/1/2/3>"
+         << endl;
     cout << "    where <graph.txt> is a text file with lines: \"u v\"" << endl;
-    cout << "    <0/1/2>: coarsening type (0: none, 1: coarsen and continue, 2: coarsen and stop)" << endl;
+    cout << "    <0/1/2>: coarsening type (0: none, 1: coarsen and continue, "
+            "2: coarsen and stop)"
+         << endl;
     cout << "    <0/1>: HDE flag (0: off, 1: on)" << endl;
-    cout << "    <0/1/2/3>: refinement (0: none, 1: Koren, 2: Tutte, 3: Koren+Tutte)" << endl;
+    cout << "    <0/1/2/3>: refinement (0: none, 1: Koren, 2: Tutte, 3: "
+            "Koren+Tutte)"
+         << endl;
     return 1;
   }
 
@@ -554,7 +592,7 @@ int main(int argc, char **argv) {
 
   cout << "Reading graph from file: " << inputFilename << endl;
   graph_t *g = readGraphFromTxt(inputFilename);
-  cout << "Graph: vertices = " << g->n << ", edges = " << g->m/2 << endl;
+  cout << "Graph: vertices = " << g->n << ", edges = " << g->m / 2 << endl;
 
   // Perform coarsening if selected.
   simpleCoarsening(g, coarseningType);
@@ -562,7 +600,7 @@ int main(int argc, char **argv) {
   VectorXd secondCoarse, thirdCoarse;
   if (coarseningType > 0) {
     int n_coarse = g->n_coarse;
-    SparseMatrix<double,RowMajor> Mc(n_coarse, n_coarse);
+    SparseMatrix<double, RowMajor> Mc(n_coarse, n_coarse);
     VectorXd degreesc(n_coarse);
     degreesc.setZero();
     loadToMatrix(Mc, degreesc, g, coarseningType);
@@ -577,15 +615,17 @@ int main(int argc, char **argv) {
       thirdCoarse = -thirdCoarse;
     thirdCoarse.normalize();
     double epsc = 1e-9;
-    powerIterationKoren(Mc, degreesc, epsc, firstCoarse, secondCoarse, thirdCoarse, coarseningType);
+    powerIterationKoren(Mc, degreesc, epsc, firstCoarse, secondCoarse,
+                        thirdCoarse, coarseningType);
     if (coarseningType == 2) {
-      writeCoords(Mc, firstCoarse, secondCoarse, thirdCoarse, coarseningType, doHDE, refineType, epsc, inputFilename);
+      writeCoords(Mc, firstCoarse, secondCoarse, thirdCoarse, coarseningType,
+                  doHDE, refineType, epsc, inputFilename);
       return 0;
     }
   }
 
   // Load the full (fine) graph.
-  SparseMatrix<double,RowMajor> M(g->n, g->n);
+  SparseMatrix<double, RowMajor> M(g->n, g->n);
   VectorXd degrees(g->n);
   degrees.setZero();
   loadToMatrix(M, degrees, g, 0);
@@ -598,7 +638,7 @@ int main(int argc, char **argv) {
   if (coarseningType == 1) {
     for (long i = 0; i < g->n; i++) {
       secondVec(i) = secondCoarse[g->coarseID[i]];
-      thirdVec(i)  = thirdCoarse[g->coarseID[i]];
+      thirdVec(i) = thirdCoarse[g->coarseID[i]];
     }
     secondVec.normalize();
     thirdVec.normalize();
@@ -629,7 +669,8 @@ int main(int argc, char **argv) {
       RefineTutte(M, secondVec, thirdVec, numTutteSmoothing);
       powerIterationKoren(M, degrees, eps, firstVec, secondVec, thirdVec, 0);
     }
-    writeCoords(M, firstVec, secondVec, thirdVec, coarseningType, doHDE, refineType, 0, inputFilename);
+    writeCoords(M, firstVec, secondVec, thirdVec, coarseningType, doHDE,
+                refineType, 0, inputFilename);
   }
 
   free(g->rowOffsets);
@@ -643,6 +684,8 @@ int main(int argc, char **argv) {
   free(g);
 
   auto endTimer = chrono::high_resolution_clock::now();
-  cout << "Overall time: " << chrono::duration<double>(endTimer - startTimer).count() << " s." << endl;
+  cout << "Overall time: "
+       << chrono::duration<double>(endTimer - startTimer).count() << " s."
+       << endl;
   return 0;
 }
