@@ -182,6 +182,11 @@ def main():
     renderWindow.SetSize(800, 600)
     renderWindow.SetWindowName("3D Graph with Rotating Coordinates (VTK - Python)")
 
+    objExporter = vtk.vtkOBJExporter()
+    objExporter.SetFilePrefix("graph")  # This will create "graph.obj" and "graph.mtl"
+    objExporter.SetRenderWindow(renderWindow)
+    objExporter.Write()
+
     interactor.Start()
 
 if __name__ == "__main__":
