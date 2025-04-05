@@ -373,7 +373,8 @@ static int HDE(SparseMatrix<double,RowMajor>& M, graph_t *g, VectorXd& degrees, 
 // Koren's Power–Iteration Algorithm for computing the second and third eigenvectors.
 // It performs D–orthonormalization against previously computed eigenvectors.
 static int powerIterationKoren(SparseMatrix<double,RowMajor>& M, VectorXd& degrees, double eps,
-                                VectorXd& firstVec, VectorXd& secondVec, VectorXd& thirdVec, VectorXd& fourthVec, int coarseningType) {
+                               VectorXd& firstVec, VectorXd& secondVec, VectorXd& thirdVec, VectorXd& fourthVec,
+                               int coarseningType) {
   cout << "Using eps " << eps << " for second eigenvector" << endl;
   int n = M.rows();
   VectorXd uk_hat = secondVec;
@@ -382,8 +383,10 @@ static int powerIterationKoren(SparseMatrix<double,RowMajor>& M, VectorXd& degre
   double mult1_denom = firstVec.dot(firstVecD);
   VectorXd residual(n);
   int num_iterations1 = 0;
+  const int max_iter = 10000;  // Максимальное число итераций
+
   auto startTimer = chrono::high_resolution_clock::now();
-  while (true) {
+  while (num_iterations1 < max_iter) {
     uk = uk_hat;
     double mult1_num = uk.dot(firstVecD);
     uk = uk - (mult1_num / mult1_denom) * firstVec;
@@ -394,10 +397,13 @@ static int powerIterationKoren(SparseMatrix<double,RowMajor>& M, VectorXd& degre
     if (residual.norm() < eps)
       break;
   }
+  if(num_iterations1 >= max_iter)
+    cout << "Warning: second eigenvector power iteration did not converge within " << max_iter << " iterations." << endl;
   cout << "Num iterations for second eigenvector: " << num_iterations1 << endl;
   secondVec = uk_hat;
   auto endTimer = chrono::high_resolution_clock::now();
-  cout << "Second eigenvector computation time: " << chrono::duration<double>(endTimer - startTimer).count() << " s." << endl;
+  cout << "Second eigenvector computation time: "
+       << chrono::duration<double>(endTimer - startTimer).count() << " s." << endl;
 
   eps = 2.0 * eps;
   cout << "Using eps " << eps << " for third eigenvector" << endl;
@@ -405,8 +411,9 @@ static int powerIterationKoren(SparseMatrix<double,RowMajor>& M, VectorXd& degre
   double mult2_denom = secondVec.dot(secondVecD);
   uk_hat = thirdVec;
   int num_iterations2 = 0;
+  double prev_diff = std::numeric_limits<double>::infinity();
   startTimer = chrono::high_resolution_clock::now();
-  while (true) {
+  while (num_iterations2 < max_iter) {
     uk = uk_hat;
     double mult1_num = uk.dot(firstVecD);
     uk = uk - (mult1_num / mult1_denom) * firstVec;
@@ -416,48 +423,79 @@ static int powerIterationKoren(SparseMatrix<double,RowMajor>& M, VectorXd& degre
     uk_hat.normalize();
     num_iterations2++;
     residual = uk - uk_hat;
-    if (residual.norm() < eps)
+    double diff = residual.norm();
+    // Выравниваем знак, чтобы избежать осцилляций.
+    if (uk_hat.dot(uk) < 0)
+      uk_hat = -uk_hat;
+    if (diff < eps)
       break;
+    if (num_iterations2 % 100 == 0) {
+      if (fabs(diff - prev_diff) < 1e-12 && diff > eps*10) {
+        cout << "Stagnation detected in third eigenvector iteration at iteration "
+             << num_iterations2 << ", diff = " << diff << endl;
+        break;
+      }
+      prev_diff = diff;
+    }
   }
+  if(num_iterations2 >= max_iter)
+    cout << "Warning: third eigenvector power iteration did not converge within " << max_iter << " iterations." << endl;
   cout << "Num iterations for third eigenvector: " << num_iterations2 << endl;
   thirdVec = uk_hat;
   auto endTimer2 = chrono::high_resolution_clock::now();
-  cout << "Third eigenvector computation time: " << chrono::duration<double>(endTimer2 - startTimer).count() << " s." << endl;
+  cout << "Third eigenvector computation time: "
+       << chrono::duration<double>(endTimer2 - startTimer).count() << " s." << endl;
 
-  ///TESTING
+  // TESTING: Fourth eigenvector computation for 3D embedding.
   eps = 2.0 * eps;
-  cout << "Using eps " << eps << " for third eigenvector" << endl;
+  cout << "Using eps " << eps << " for fourth eigenvector" << endl;
   VectorXd thirdVecD = thirdVec.cwiseProduct(degrees);
   double mult3_denom = thirdVec.dot(thirdVecD);
-
   uk_hat = fourthVec;
   int num_iterations3 = 0;
+  prev_diff = std::numeric_limits<double>::infinity();
   startTimer = chrono::high_resolution_clock::now();
-  while (true)
-  {
+  while (num_iterations3 < max_iter) {
     uk = uk_hat;
-    // Remove component along firstVec
+    // Remove component along firstVec.
     double mult1_num = uk.dot(firstVecD);
     uk = uk - (mult1_num / mult1_denom) * firstVec;
-    // Remove component along secondVec
+    // Remove component along secondVec.
     double mult2_num = uk.dot(secondVecD);
     uk = uk - (mult2_num / mult2_denom) * secondVec;
-    // Remove component along thirdVec
+    // Remove component along thirdVec.
     double mult3_num = uk.dot(thirdVecD);
     uk = uk - (mult3_num / mult3_denom) * thirdVec;
     uk_hat = M * uk;
     uk_hat.normalize();
     num_iterations3++;
     residual = uk - uk_hat;
-    if (residual.norm() < eps)
+    double diff = residual.norm();
+    if (uk_hat.dot(uk) < 0)
+      uk_hat = -uk_hat;
+    if (diff < eps)
       break;
+    if (num_iterations3 % 100 == 0) {
+      if (fabs(diff - prev_diff) < 1e-12 && diff > eps*10) {
+        cout << "Stagnation detected in fourth eigenvector iteration at iteration "
+             << num_iterations3 << ", diff = " << diff << endl;
+        break;
+      }
+      prev_diff = diff;
+    }
   }
-  fourthVec = uk_hat;
+  if(num_iterations3 >= max_iter)
+    cout << "Warning: fourth eigenvector power iteration did not converge within " << max_iter << " iterations." << endl;
   cout << "Num iterations for fourth eigenvector: " << num_iterations3 << endl;
-  /// test end
+  fourthVec = uk_hat;
   auto endTimer3 = chrono::high_resolution_clock::now();
-  cout << "FOURTH eigenvector computation time: " << chrono::duration<double>(endTimer3 - startTimer).count() << " s." << endl;
-  cout << "Dot products of eigenvectors: " << firstVec.dot(secondVec) << " " << firstVec.dot(thirdVec) << " " << secondVec.dot(thirdVec) << endl;
+  cout << "Fourth eigenvector computation time: "
+       << chrono::duration<double>(endTimer3 - startTimer).count() << " s." << endl;
+
+  cout << "Dot products of eigenvectors: "
+       << firstVec.dot(secondVec) << " "
+       << firstVec.dot(thirdVec) << " "
+       << secondVec.dot(thirdVec) << endl;
   return 0;
 }
 
